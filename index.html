@@ -13,6 +13,14 @@
   html, body { margin: 0; padding: 0; background: #14171C; }
   #root { min-height: 100vh; }
 </style>
+<script>
+  window.onerror = function(msg, url, line, col, error) {
+    document.body.innerHTML = '<pre style="color:#fff;background:#3a1414;padding:20px;white-space:pre-wrap;font-family:monospace;font-size:13px;">CHYBA PRI NACITANI DASHBOARDU:\n\n' +
+      msg + '\n(radek ' + line + ', sloupec ' + col + ')\n\n' +
+      (error && error.stack ? error.stack : '(bez stacktrace)') + '</pre>';
+    return false;
+  };
+</script>
 </head>
 <body>
 <div id="root"></div>
