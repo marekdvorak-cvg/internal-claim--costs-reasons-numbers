@@ -6,7 +6,8 @@
 <title>Přehled interních reklamací</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<script crossorigin src="https://unpkg.com/react-is@18/umd/react-is.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts/umd/Recharts.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
   html, body { margin: 0; padding: 0; background: #14171C; }
@@ -620,8 +621,14 @@ function ComplaintsDashboard() {
 }
 
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<ComplaintsDashboard />);
+try {
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<ComplaintsDashboard />);
+} catch (err) {
+  document.getElementById('root').innerHTML =
+    '<div style="color:#fff;background:#3a1414;padding:20px;font-family:monospace;white-space:pre-wrap;">Chyba při načítání dashboardu:\n' + (err && err.message ? err.message : err) + '</div>';
+  console.error(err);
+}
 </script>
 </body>
 </html>
