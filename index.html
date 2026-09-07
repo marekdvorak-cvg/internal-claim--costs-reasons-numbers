@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Přehled interních reklamací</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #14171C; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+const { BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
+
+// ---------- Raw data (Salesforce: Complaint__c / Complaint_Problem__c / Problem_Category__c) ----------
+// Scope: Complaint__c.Type__c = 'internal', Complaint_Start_Date__c >= 2025-01-01
+// carsArrived        = COUNT(Order) where Order.Car_Delivery_Date__c falls in that month (all orders, depot arrivals)
+// carsWithComplaint  = COUNT(DISTINCT Order) among those same arrivals that later got >=1 internal Complaint
+//                      — i.e. "of the cars that arrived in this month, how many ended up complained about"
+const MONTHLY_TOTALS = [
+  { month: "01/25", complaints: 35, costCzk: 280812.76, carsArrived: 167, carsWithComplaint: 37 },
+  { month: "02/25", complaints: 54, costCzk: 247366.97, carsArrived: 164, carsWithComplaint: 52 },
+  { month: "03/25", complaints: 54, costCzk: 205828.15, carsArrived: 194, carsWithComplaint: 51 },
+  { month: "04/25", complaints: 45, costCzk: 195202.10, carsArrived: 212, carsWithComplaint: 50 },
+  { month: "05/25", complaints: 54, costCzk: 265301.70, carsArrived: 173, carsWithComplaint: 32 },
+  { month: "06/25", complaints: 41, costCzk: 259102.37, carsArrived: 202, carsWithComplaint: 39 },
+  { month: "07/25", complaints: 86, costCzk: 460000.15, carsArrived: 218, carsWithComplaint: 58 },
+  { month: "08/25", complaints: 64, costCzk: 235026.38, carsArrived: 147, carsWithComplaint: 34 },
+  { month: "09/25", complaints: 54, costCzk: 225479.42, carsArrived: 239, carsWithComplaint: 52 },
+  { month: "10/25", complaints: 71, costCzk: 464572.10, carsArrived: 247, carsWithComplaint: 50 },
+  { month: "11/25", complaints: 88, costCzk: 368127.92, carsArrived: 213, carsWithComplaint: 67 },
+  { month: "12/25", complaints: 102, costCzk: 397006.35, carsArrived: 196, carsWithComplaint: 47 },
+  { month: "01/26", complaints: 81, costCzk: 366158.84, carsArrived: 208, carsWithComplaint: 48 },
+  { month: "02/26", complaints: 60, costCzk: 364861.45, carsArrived: 186, carsWithComplaint: 42 },
+  { month: "03/26", complaints: 85, costCzk: 356115.13, carsArrived: 206, carsWithComplaint: 67 },
+  { month: "04/26", complaints: 113, costCzk: 460360.88, carsArrived: 239, carsWithComplaint: 78 },
+  { month: "05/26", complaints: 77, costCzk: 335208.95, carsArrived: 216, carsWithComplaint: 46 },
+  { month: "06/26", complaints: 90, costCzk: 362588.45, carsArrived: 238, carsWithComplaint: 62 },
+  { month: "07/26", complaints: 135, costCzk: 588056.88, carsArrived: 245, carsWithComplaint: 84 },
+  { month: "08/26", complaints: 115, costCzk: 378495.76, carsArrived: 209, carsWithComplaint: 79 },
+  { month: "09/26", complaints: 36, costCzk: 93500.98, carsArrived: 47, carsWithComplaint: 15 },
+].map(m => ({ ...m, ratePct: m.carsArrived ? (m.carsWithComplaint / m.carsArrived) * 100 : 0, avgCostCzk: m.complaints ? m.costCzk / m.complaints : 0 }));
+
+const MONTHLY_CATEGORY = [
+  { month: "01/25", brakes: 4, chassis: 5, compensable: 0, electronics: 19, engine: 8, "exterior-cosmetics": 4, interior: 2, "transmission-drivetrain": 2, other: 0 },
+  { month: "02/25", brakes: 3, chassis: 7, compensable: 0, electronics: 29, engine: 8, "exterior-cosmetics": 20, interior: 3, "transmission-drivetrain": 0, other: 4 },
+  { month: "03/25", brakes: 2, chassis: 11, compensable: 0, electronics: 30, engine: 5, "exterior-cosmetics": 9, interior: 5, "transmission-drivetrain": 1, other: 1 },
+  { month: "04/25", brakes: 3, chassis: 7, compensable: 0, electronics: 20, engine: 11, "exterior-cosmetics": 12, interior: 2, "transmission-drivetrain": 1, other: 1 },
+  { month: "05/25", brakes: 12, chassis: 5, compensable: 0, electronics: 29, engine: 4, "exterior-cosmetics": 14, interior: 4, "transmission-drivetrain": 0, other: 1 },
+  { month: "06/25", brakes: 15, chassis: 10, compensable: 0, electronics: 12, engine: 3, "exterior-cosmetics": 11, interior: 3, "transmission-drivetrain": 0, other: 0 },
+  { month: "07/25", brakes: 15, chassis: 16, compensable: 0, electronics: 31, engine: 9, "exterior-cosmetics": 13, interior: 6, "transmission-drivetrain": 0, other: 0 },
+  { month: "08/25", brakes: 12, chassis: 11, compensable: 0, electronics: 20, engine: 8, "exterior-cosmetics": 11, interior: 5, "transmission-drivetrain": 1, other: 0 },
+  { month: "09/25", brakes: 5, chassis: 9, compensable: 0, electronics: 15, engine: 6, "exterior-cosmetics": 11, interior: 8, "transmission-drivetrain": 1, other: 0 },
+  { month: "10/25", brakes: 11, chassis: 16, compensable: 0, electronics: 31, engine: 4, "exterior-cosmetics": 8, interior: 2, "transmission-drivetrain": 0, other: 0 },
+  { month: "11/25", brakes: 8, chassis: 9, compensable: 0, electronics: 35, engine: 14, "exterior-cosmetics": 15, interior: 2, "transmission-drivetrain": 4, other: 3 },
+  { month: "12/25", brakes: 4, chassis: 14, compensable: 0, electronics: 34, engine: 16, "exterior-cosmetics": 23, interior: 10, "transmission-drivetrain": 1, other: 1 },
+  { month: "01/26", brakes: 9, chassis: 15, compensable: 0, electronics: 28, engine: 12, "exterior-cosmetics": 14, interior: 4, "transmission-drivetrain": 1, other: 0 },
+  { month: "02/26", brakes: 5, chassis: 6, compensable: 0, electronics: 23, engine: 12, "exterior-cosmetics": 14, interior: 3, "transmission-drivetrain": 0, other: 0 },
+  { month: "03/26", brakes: 13, chassis: 13, compensable: 0, electronics: 16, engine: 13, "exterior-cosmetics": 22, interior: 4, "transmission-drivetrain": 1, other: 2 },
+  { month: "04/26", brakes: 3, chassis: 15, compensable: 0, electronics: 38, engine: 16, "exterior-cosmetics": 26, interior: 8, "transmission-drivetrain": 1, other: 8 },
+  { month: "05/26", brakes: 10, chassis: 15, compensable: 0, electronics: 26, engine: 7, "exterior-cosmetics": 15, interior: 3, "transmission-drivetrain": 1, other: 0 },
+  { month: "06/26", brakes: 7, chassis: 16, compensable: 0, electronics: 38, engine: 1, "exterior-cosmetics": 19, interior: 7, "transmission-drivetrain": 1, other: 2 },
+  { month: "07/26", brakes: 18, chassis: 22, compensable: 0, electronics: 33, engine: 3, "exterior-cosmetics": 31, interior: 11, "transmission-drivetrain": 4, other: 8 },
+  { month: "08/26", brakes: 12, chassis: 10, compensable: 0, electronics: 19, engine: 8, "exterior-cosmetics": 36, interior: 17, "transmission-drivetrain": 3, other: 14 },
+  { month: "09/26", brakes: 5, chassis: 4, compensable: 0, electronics: 5, engine: 0, "exterior-cosmetics": 16, interior: 3, "transmission-drivetrain": 0, other: 3 },
+];
+
+// Cost per category, per month — SUM(Effective_Price_without_VAT_in_CZK__c) of Service Jobs whose
+// Complaint_Problem__r.Problem_Category__r.Type__c matches. One job = one category, no double count.
+const MONTHLY_CATEGORY_COST = {
+  "01/25": { brakes: 5254.38, chassis: 21340.3, compensable: 0, electronics: 3330.06, engine: 20068.41, "exterior-cosmetics": 0, interior: 13362.43, "transmission-drivetrain": 151102.61, other: 0 },
+  "02/25": { brakes: 8399.88, chassis: 14760.38, compensable: 0, electronics: 97714.99, engine: 43764.78, "exterior-cosmetics": 75488.28, interior: 1481.57, "transmission-drivetrain": 0, other: 5757.09 },
+  "03/25": { brakes: 8237.52, chassis: 57625.06, compensable: 0, electronics: 90076.05, engine: 7924.73, "exterior-cosmetics": 22036.83, interior: 8328.69, "transmission-drivetrain": 7942.03, other: 3657.24 },
+  "04/25": { brakes: 14076.52, chassis: 37945.76, compensable: 0, electronics: 80069.99, engine: 27140.8, "exterior-cosmetics": 24850.29, interior: 4299.9, "transmission-drivetrain": 6818.84, other: 0 },
+  "05/25": { brakes: 55110.26, chassis: 11052.19, compensable: 0, electronics: 120317.22, engine: 23705.66, "exterior-cosmetics": 46916.39, interior: 7799.9, "transmission-drivetrain": 0, other: 400.08 },
+  "06/25": { brakes: 72202.34, chassis: 25561.47, compensable: 0, electronics: 35866.88, engine: 39200.36, "exterior-cosmetics": 82171.33, interior: 4099.99, "transmission-drivetrain": 0, other: 0 },
+  "07/25": { brakes: 53539.69, chassis: 57095.3, compensable: 0, electronics: 123940.35, engine: 141952.79, "exterior-cosmetics": 52642.04, interior: 30829.98, "transmission-drivetrain": 0, other: 0 },
+  "08/25": { brakes: 40549.79, chassis: 20829.8, compensable: 0, electronics: 38113.72, engine: 54722.62, "exterior-cosmetics": 44952.59, interior: 32857.9, "transmission-drivetrain": 2999.96, other: 0 },
+  "09/25": { brakes: 0, chassis: 25262.08, compensable: 0, electronics: 27978.98, engine: 84902.36, "exterior-cosmetics": 37700.26, interior: 14635.81, "transmission-drivetrain": 34999.93, other: 0 },
+  "10/25": { brakes: 19799.98, chassis: 225057.4, compensable: 0, electronics: 112690.92, engine: 24438.26, "exterior-cosmetics": 25314.48, interior: 2000.14, "transmission-drivetrain": 0, other: 0 },
+  "11/25": { brakes: 45275.13, chassis: 38267.58, compensable: 0, electronics: 125093.02, engine: 96421.11, "exterior-cosmetics": 28050.17, interior: 11000.02, "transmission-drivetrain": 16856.83, other: 7164.06 },
+  "12/25": { brakes: 14919.84, chassis: 47904.27, compensable: 0, electronics: 105466.13, engine: 89284.46, "exterior-cosmetics": 38645.22, interior: 45650.09, "transmission-drivetrain": 53636.24, other: 1500.1 },
+  "01/26": { brakes: 59836.32, chassis: 58598.81, compensable: 0, electronics: 133219.12, engine: 53283.48, "exterior-cosmetics": 54421.28, interior: 5999.92, "transmission-drivetrain": 799.91, other: 0 },
+  "02/26": { brakes: 11000.02, chassis: 22369.14, compensable: 0, electronics: 84900.66, engine: 146807.94, "exterior-cosmetics": 89712.8, interior: 10070.89, "transmission-drivetrain": 0, other: 0 },
+  "03/26": { brakes: 34289.18, chassis: 65587.35, compensable: 0, electronics: 110264.31, engine: 47500.23, "exterior-cosmetics": 82679.97, interior: 7600.02, "transmission-drivetrain": 6193.94, other: 2000.13 },
+  "04/26": { brakes: 19266.24, chassis: 49472.44, compensable: 0, electronics: 137349.06, engine: 86583.16, "exterior-cosmetics": 93287.47, interior: 40364.18, "transmission-drivetrain": 1200.04, other: 32838.29 },
+  "05/26": { brakes: 39278.04, chassis: 47579.69, compensable: 0, electronics: 157735.51, engine: 18366.48, "exterior-cosmetics": 37995.17, interior: 6114.0, "transmission-drivetrain": 28140.06, other: 0 },
+  "06/26": { brakes: 18640.96, chassis: 48142.01, compensable: 0, electronics: 183315.09, engine: 5599.93, "exterior-cosmetics": 78855.94, interior: 22134.6, "transmission-drivetrain": 999.97, other: 4899.95 },
+  "07/26": { brakes: 79399.02, chassis: 230191.41, compensable: 0, electronics: 101435.34, engine: 3700.08, "exterior-cosmetics": 56625.6, interior: 26205.33, "transmission-drivetrain": 62499.82, other: 28000.28 },
+  "08/26": { brakes: 42412.16, chassis: 16116.82, compensable: 0, electronics: 48466.06, engine: 37820.94, "exterior-cosmetics": 82678.88, interior: 66901.01, "transmission-drivetrain": 21542.09, other: 62557.8 },
+  "09/26": { brakes: 17040.12, chassis: 21800.21, compensable: 0, electronics: 8371.83, engine: 0, "exterior-cosmetics": 34023.02, interior: 4793.98, "transmission-drivetrain": 0, other: 7471.82 },
+};
+
+// count   = number of Complaint Problems (CPC) of that Type in the period (Complaint_Problem__c)
+// jobCnt  = number of Service Jobs (repairs) linked to a Complaint Problem of that category
+// costCzk = SUM(Effective_Price_without_VAT_in_CZK__c) of those Service Jobs — each job belongs to
+//           exactly one Complaint Problem → exactly one category, so nothing is double-counted here.
+const CATEGORY_TOTALS = [
+  { key: "electronics", label: "Electronics", count: 531, jobCnt: 716, costCzk: 1925715.29 },
+  { key: "exterior-cosmetics", label: "Exterior – Cosmetics", count: 344, jobCnt: 412, costCzk: 1089048.01 },
+  { key: "chassis", label: "Chassis", count: 236, jobCnt: 300, costCzk: 1142559.47 },
+  { key: "engine", label: "Engine", count: 168, jobCnt: 250, costCzk: 1053188.58 },
+  { key: "brakes", label: "Brakes", count: 176, jobCnt: 224, costCzk: 658527.39 },
+  { key: "interior", label: "Interior", count: 112, jobCnt: 140, costCzk: 366530.35 },
+  { key: "other", label: "Other", count: 48, jobCnt: 56, costCzk: 156246.84 },
+  { key: "transmission-drivetrain", label: "Transmission & Drivetrain", count: 23, jobCnt: 29, costCzk: 395732.27 },
+  { key: "compensable", label: "Compensable", count: 0, jobCnt: 0, costCzk: 0 },
+];
+
+// Exterior – Cosmetics subcategories (individual Problem_Category__c records with Type__c = 'exterior-cosmetics')
+const EXTERIOR_SUBCATEGORIES = [
+  { key: "body-damage", label: "Car body damage – holes, dents, missing parts", shortLabel: "Body damage", count: 151, jobCnt: 178, costCzk: 371023.88 },
+  { key: "paint", label: "Damaged paint – scratches, scuffs, etc.", shortLabel: "Damaged paint", count: 136, jobCnt: 165, costCzk: 538496.10 },
+  { key: "glass", label: "Scratched or cracked car glass", shortLabel: "Glass", count: 27, jobCnt: 34, costCzk: 115795.81 },
+  { key: "contamination", label: "Contamination", shortLabel: "Contamination", count: 26, jobCnt: 29, costCzk: 26732.03 },
+  { key: "corrosion", label: "Car body corrosion", shortLabel: "Corrosion", count: 4, jobCnt: 6, costCzk: 37000.19 },
+];
+const EXTERIOR_COLOR = {
+  "body-damage": "#E5533D",
+  paint: "#5B8DEF",
+  glass: "#F2A93B",
+  contamination: "#9B7EDE",
+  corrosion: "#C9A876",
+};
+const EXTERIOR_ORDER = ["body-damage", "paint", "glass", "contamination", "corrosion"];
+const EXTERIOR_LABEL = Object.fromEntries(EXTERIOR_SUBCATEGORIES.map(c => [c.key, c.label]));
+
+// Monthly breakdown of Exterior – Cosmetics by subcategory (same scope/window as MONTHLY_CATEGORY)
+const EXTERIOR_MONTHLY = [
+  { month: "01/25", "body-damage": 2, paint: 1, glass: 1, contamination: 0, corrosion: 0 },
+  { month: "02/25", "body-damage": 7, paint: 9, glass: 3, contamination: 0, corrosion: 1 },
+  { month: "03/25", "body-damage": 3, paint: 5, glass: 1, contamination: 0, corrosion: 0 },
+  { month: "04/25", "body-damage": 8, paint: 4, glass: 0, contamination: 0, corrosion: 0 },
+  { month: "05/25", "body-damage": 6, paint: 7, glass: 1, contamination: 0, corrosion: 0 },
+  { month: "06/25", "body-damage": 4, paint: 5, glass: 1, contamination: 1, corrosion: 0 },
+  { month: "07/25", "body-damage": 7, paint: 3, glass: 2, contamination: 1, corrosion: 0 },
+  { month: "08/25", "body-damage": 6, paint: 1, glass: 1, contamination: 3, corrosion: 0 },
+  { month: "09/25", "body-damage": 6, paint: 3, glass: 0, contamination: 1, corrosion: 1 },
+  { month: "10/25", "body-damage": 4, paint: 3, glass: 1, contamination: 0, corrosion: 0 },
+  { month: "11/25", "body-damage": 14, paint: 0, glass: 1, contamination: 0, corrosion: 0 },
+  { month: "12/25", "body-damage": 12, paint: 7, glass: 0, contamination: 3, corrosion: 1 },
+  { month: "01/26", "body-damage": 5, paint: 7, glass: 1, contamination: 1, corrosion: 0 },
+  { month: "02/26", "body-damage": 3, paint: 8, glass: 1, contamination: 2, corrosion: 0 },
+  { month: "03/26", "body-damage": 17, paint: 4, glass: 0, contamination: 1, corrosion: 0 },
+  { month: "04/26", "body-damage": 11, paint: 12, glass: 2, contamination: 1, corrosion: 0 },
+  { month: "05/26", "body-damage": 9, paint: 4, glass: 2, contamination: 0, corrosion: 0 },
+  { month: "06/26", "body-damage": 7, paint: 7, glass: 2, contamination: 2, corrosion: 1 },
+  { month: "07/26", "body-damage": 10, paint: 19, glass: 0, contamination: 2, corrosion: 0 },
+  { month: "08/26", "body-damage": 8, paint: 17, glass: 4, contamination: 7, corrosion: 0 },
+  { month: "09/26", "body-damage": 2, paint: 10, glass: 3, contamination: 1, corrosion: 0 },
+];
+
+const EXTERIOR_MONTHLY_COST = {
+  "01/25": { "body-damage": 0, paint: 0, glass: 0, contamination: 0, corrosion: 0 },
+  "02/25": { "body-damage": 22116.32, paint: 37047.84, glass: 15324.05, contamination: 0, corrosion: 1000.07 },
+  "03/25": { "body-damage": 1500.1, paint: 20536.73, glass: 0, contamination: 0, corrosion: 0 },
+  "04/25": { "body-damage": 17550.18, paint: 7300.11, glass: 0, contamination: 0, corrosion: 0 },
+  "05/25": { "body-damage": 9400.45, paint: 16949.95, glass: 20565.99, contamination: 0, corrosion: 0 },
+  "06/25": { "body-damage": 12476.46, paint: 67894.89, glass: 1000.07, contamination: 799.91, corrosion: 0 },
+  "07/25": { "body-damage": 41042.03, paint: 5299.97, glass: 5500.13, contamination: 799.91, corrosion: 0 },
+  "08/25": { "body-damage": 20450.19, paint: 1000.07, glass: 17026.02, contamination: 6476.31, corrosion: 0 },
+  "09/25": { "body-damage": 15900.16, paint: 16000.1, glass: 0, contamination: 799.91, corrosion: 5000.09 },
+  "10/25": { "body-damage": 10499.98, paint: 13314.4, glass: 1500.1, contamination: 0, corrosion: 0 },
+  "11/25": { "body-damage": 27050.1, paint: 0, glass: 1000.07, contamination: 0, corrosion: 0 },
+  "12/25": { "body-damage": 13944.88, paint: 16700.53, glass: 0, contamination: 1999.89, corrosion: 5999.92 },
+  "01/26": { "body-damage": 21700.15, paint: 30721.24, glass: 1199.98, contamination: 799.91, corrosion: 0 },
+  "02/26": { "body-damage": 2999.96, paint: 84912.86, glass: 1000.07, contamination: 799.91, corrosion: 0 },
+  "03/26": { "body-damage": 72679.76, paint: 9000.14, glass: 0, contamination: 1000.07, corrosion: 0 },
+  "04/26": { "body-damage": 26500.22, paint: 49408.19, glass: 16578.95, contamination: 800.11, corrosion: 0 },
+  "05/26": { "body-damage": 28745.03, paint: 8250.11, glass: 1000.03, contamination: 0, corrosion: 0 },
+  "06/26": { "body-damage": 4799.94, paint: 37300.01, glass: 9500.15, contamination: 2255.73, corrosion: 25000.11 },
+  "07/26": { "body-damage": 9845.95, paint: 45379.57, glass: 0, contamination: 1400.08, corrosion: 0 },
+  "08/26": { "body-damage": 8999.06, paint: 49179.51, glass: 18200.11, contamination: 6300.2, corrosion: 0 },
+  "09/26": { "body-damage": 2822.96, paint: 22299.88, glass: 6400.09, contamination: 2500.09, corrosion: 0 },
+};
+
+// Detail: Complaint Problems s podkategorií "Damaged paint" za 7-8/2026, pro proklik do konkrétní reklamace
+const DAMAGED_PAINT_DETAIL = [
+  { complaint: "C-003761", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000eGjry2AC/view", costCzk: 6999.94, desc: "Lakování levých předních dveří", make: "Volvo", model: "XC90", firstReg: "2025-07-01", kmMileage: 21802, vin: "YV1LFH7VXT1428839", driveLink: "https://drive.google.com/drive/folders/1TsDFzYrcVAo2Gqnllpe1PxwAT1cRA_nA" },
+  { complaint: "C-003832", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000ej2l42AA/view", costCzk: 7000.09, desc: "Oprava předního nárazníku", make: "Hyundai", model: "i30", firstReg: "2020-06-01", kmMileage: 78000, vin: "TMAHC51AALJ015970", driveLink: "https://drive.google.com/drive/folders/1uecVdGkie-c9TVOEfZflZ7AsUYayDp5G" },
+  { complaint: "C-003857", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000esWDc2AM/view", costCzk: 1599.97, desc: "Vyčistit střechu. Vyleštit škrábanečky, které půjdou.", make: "BMW", model: "Z4", firstReg: "2022-12-19", kmMileage: 16816, vin: "WBAHF31030WX92303", driveLink: "https://drive.google.com/drive/folders/1OY84R2NwZvOfcZkhTnshYTXl_zShCL0h" },
+  { complaint: "C-003860", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000esxVW2AY/view", costCzk: 1599.97, desc: "Smart repair prahu", make: "Audi", model: "A6", firstReg: "2017-05-08", kmMileage: 116000, vin: "WAUZZZ4G5HN106657", driveLink: "https://drive.google.com/drive/folders/1ejZ5vydBn_3HQWQpoWYaM52W5ZnyTVth" },
+  { complaint: "C-003854", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000esluA2AQ/view", costCzk: 1880.06, desc: "Nová antena. Smart repair prahů + impregnace plastů.", make: "Škoda", model: "Rapid", firstReg: "2018-11-01", kmMileage: 129000, vin: "TMBEP6NH3K4006955", driveLink: "https://drive.google.com/drive/folders/1VpNrLBDhgLvb26BOhJywuLSBhyXL7QVx" },
+  { complaint: "C-003855", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000esWS72AM/view", costCzk: 3199.94, desc: "Leštění škrábanců, smart repair, čištění ozonem a tepování.", make: "Škoda", model: "Kodiaq", firstReg: "2018-07-19", kmMileage: 145791, vin: "TMBLD7NS4J8099042", driveLink: "https://drive.google.com/drive/folders/17bi0nrwj1Yj0vX--MPNblx_SdpoQSvf4" },
+  { complaint: "C-003859", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000esppi2AA/view", costCzk: 800.11, desc: "Tepování + škrábanec na zadních dveřích, zkusit smart repair.", make: "BMW", model: "320", firstReg: "2021-01-01", kmMileage: 117305, vin: "WBA11DZ050FK64871", driveLink: "https://drive.google.com/drive/folders/1JnSHm-A-nvhCyQRXRevc9UgqOF5OZDhO" },
+  { complaint: "C-003858", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000esxaL2AQ/view", costCzk: 2999.91, desc: "Leštění LP dveří, zadního světla, mřížka nárazníku.", make: "BMW", model: "M240i", firstReg: "2022-09-01", kmMileage: 99500, vin: "WBA51CM0008C66828", driveLink: null },
+  { complaint: "C-003876", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000ezYln2AE/view", costCzk: 1600.09, desc: "Zadní nárazník - vyleštit + jiné škrábance.", make: "Volkswagen", model: "Golf", firstReg: "2023-02-01", kmMileage: 70402, vin: "WVWZZZCD9PW520656", driveLink: "https://drive.google.com/drive/folders/1jXkQsM4ITibICXARL6LeuuWKbrAHsaWk" },
+  { complaint: "C-003875", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000ez4kn2AA/view", costCzk: 2099.88, desc: "Celé přeleštit, vyčistit lišty kolem oken.", make: "Mercedes-Benz", model: "E 400", firstReg: "2018-07-23", kmMileage: 99111, vin: "WDD2383661F063001", driveLink: "https://drive.google.com/drive/folders/176vQnAT4JP2m1Dmci8g6mHrCJe0zDT7a" },
+  { complaint: "C-003893", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000f9P2r2AE/view", costCzk: 1599.97, desc: "Vyleštit kolem dokola + případně smart repair.", make: "Fiat", model: "500", firstReg: "2023-01-27", kmMileage: 28951, vin: "ZFAEFAR45NX127493", driveLink: null },
+  { complaint: "C-003892", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000f9Lgv2AE/view", costCzk: 2499.97, desc: "Celé vyleštit. Klíč/důlky neřešit.", make: "Renault", model: "Arkana", firstReg: "2023-06-06", kmMileage: 73534, vin: "VF1RJL008UC371867", driveLink: "https://drive.google.com/drive/folders/1u8aHbyTwaVXSN6p5XqahYSNIMA24EaZp" },
+  { complaint: "C-003926", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fI6CR2A0/view", costCzk: 2000.06, desc: "Smart repair zrcátko, dveře řidiče + přeleštit škrábance.", make: "Volkswagen", model: "Passat", firstReg: "2015-04-16", kmMileage: 170000, vin: "WVWZZZ3CZFP415566", driveLink: "https://drive.google.com/drive/folders/1y63MKsB3ZKAdHbVGWdC7f9dGjLWu3e2A" },
+  { complaint: "C-003928", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fIFtr2AG/view", costCzk: 1000.03, desc: "Smart repair přední části pravého prahu.", make: "Volkswagen", model: "Golf", firstReg: "2019-01-25", kmMileage: 91600, vin: "WVWZZZAUZKW094187", driveLink: "https://drive.google.com/drive/folders/1HUGR2RP04Y28AHrc1OXxmFLT5eQTjBNm" },
+  { complaint: "C-003922", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fIGwQ2AW/view", costCzk: 1999.9, desc: "Celé vyleštit.", make: "Land Rover", model: "Range Rover Evoque", firstReg: "2013-05-10", kmMileage: 149000, vin: "SALVA2DEXDH789777", driveLink: "https://drive.google.com/drive/folders/111_U2CI8IY6beZ_xVjqoZD86wJGRn4HA" },
+  { complaint: "C-003936", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fLEjo2AG/view", costCzk: 2500.0, desc: "Poškození na prahu - očistit a zaretušovat.", make: "Renault", model: "Megane", firstReg: "2023-09-01", kmMileage: 43000, vin: "VF1RCB00569767470", driveLink: "https://drive.google.com/drive/folders/1d7FT5A8eQGaORcWJQJZbl2d2FwoPzP1O" },
+  { complaint: "C-003924", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fIEWP2A4/view", costCzk: 1999.9, desc: "Přeleštit celé auto, smart repair zadního nárazníku + LP dveří.", make: "Audi", model: "A4", firstReg: "2018-03-15", kmMileage: 94000, vin: "WAUZZZF41JA149635", driveLink: "https://drive.google.com/drive/folders/1CR_ChbfiGRe2hAYQCo3MgWo1R8PRWrJc" },
+  { complaint: "C-003925", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fIANv2AO/view", costCzk: 1199.89, desc: "Vyleštit střechu.", make: "BMW", model: "i3", firstReg: "2022-03-01", kmMileage: 39159, vin: "WBY8P210207K79336", driveLink: "https://drive.google.com/drive/folders/1xgxadVnd7asnggAPW0NbAsteHRSrFo2W" },
+  { complaint: "C-003950", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fRyoZ2AS/view", costCzk: 799.89, desc: "Vyleštit + smart repair zadního nárazníku + zrcátko.", make: "Mercedes-Benz", model: "V 300", firstReg: "2022-02-01", kmMileage: 150000, vin: "W1V44781113959177", driveLink: "https://drive.google.com/drive/folders/1cN0MMnx6obnJl2XoD2SqXvclrvYFshn5" },
+  { complaint: "C-003995", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fe5Cf2AI/view", costCzk: 799.89, desc: "Vyleštit zadní nárazník a zadní víko.", make: "Volkswagen", model: "T6 Caravelle", firstReg: "2022-07-01", kmMileage: 74302, vin: "WV2ZZZ7HZPH005346", driveLink: "https://drive.google.com/drive/folders/1WhoeZvewtqxMZojA0dJVXEaM31zG1_A0" },
+  { complaint: "C-003998", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000ffNNh2AM/view", costCzk: 1600.02, desc: "Přeleštit škrábance na levém boku.", make: "Volkswagen", model: "Crafter", firstReg: "2025-07-03", kmMileage: 9703, vin: "WV1ZZZSY3S9072271", driveLink: "https://drive.google.com/drive/folders/1LLfFdrQqab1Qp3WuHnIquDeGT3se0gsC" },
+  { complaint: "C-003993", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fdh5X2AQ/view", costCzk: 5000.12, desc: "Nalakovat přední nárazník.", make: "Mercedes-Benz", model: "A 200", firstReg: "2022-05-01", kmMileage: 69240, vin: "W1K1770881N286791", driveLink: "https://drive.google.com/drive/folders/13mZv6wUXiRVuj08ikzounIVMRW3ylLWZ" },
+  { complaint: "C-003994", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fdx0c2AA/view", costCzk: 5000.12, desc: "Smart repair a vyleštění zadního nárazníku.", make: "Audi", model: "A4", firstReg: "2016-06-02", kmMileage: 167000, vin: "WAUZZZF45GA110622", driveLink: "https://drive.google.com/drive/folders/10kymyufqHZ_JuRM8njVOLDT7JAigIFga" },
+  { complaint: "C-004058", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000g0wlO2AQ/view", costCzk: 6500.09, desc: "Zadní nárazník - lakování.", make: "Mercedes-Benz", model: "E 300", firstReg: "2021-07-01", kmMileage: 115547, vin: "W1K2132161A992495", driveLink: "https://drive.google.com/drive/folders/157qP7VIyu2HXrTJzaIkP0uNiPoEGcsgW" },
+  { complaint: "C-004131", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gSXbx2AG/view", costCzk: 1600.07, desc: "SR horní hrany předního nárazníku.", make: "Mazda", model: "3", firstReg: "2022-01-17", kmMileage: 19999, vin: "JM4BP6HGA01301477", driveLink: "https://drive.google.com/drive/folders/1V2XdG9QkVeIpa0qCTe2_DFxf4JbVX42D" },
+  { complaint: "C-004179", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gkVIM2A2/view", costCzk: 2400.02, desc: "Rozleštění / oprava hrany kufru.", make: "BMW", model: "435", firstReg: "2014-09-17", kmMileage: 160800, vin: "WBA3S910X0K314413", driveLink: "https://drive.google.com/drive/folders/17NX32tkWnsp2gyouZirzB1dodxSSrTOX" },
+  { complaint: "C-004152", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gXSlK2AW/view", costCzk: 1599.93, desc: "Poškození sloupku - zádveří, zkusit opravit.", make: "Kia", model: "Sportage", firstReg: "2020-06-01", kmMileage: 65000, vin: "U5YPH814AKL727006", driveLink: null },
+  { complaint: "C-004193", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gqgau2AA/view", costCzk: 2500.06, desc: "Celé auto vyleštit, nelakovat.", make: "Volvo", model: "V90", firstReg: "2023-04-11", kmMileage: 94180, vin: "YV1PWK5V1P1193111", driveLink: "https://drive.google.com/drive/folders/1Ow4LIV8WgQa6EQSM5GTSvX0cHsWZs-ZB" },
+  { complaint: "C-004169", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gjipZ2AQ/view", costCzk: 2500.06, desc: "Celé vyleštit.", make: "Ford", model: "Mustang Mach-E", firstReg: "2023-06-12", kmMileage: 26850, vin: "WF0TK3SS6NMA54958", driveLink: "https://drive.google.com/drive/folders/1qZY7TGTcEmKbBZlh0oTm5pZuI9NmtTrJ" },
+  { complaint: "C-004214", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gwmX72AI/view", costCzk: 800.02, desc: "Poškození pravých zadních dveří - řešit.", make: "Seat", model: "Leon", firstReg: "2018-04-23", kmMileage: 122500, vin: "VSSZZZ5FZJR125687", driveLink: "https://drive.google.com/drive/folders/1nahrHOX-qNtpP3oi-fxIvxupjnVZGF7h" },
+  { complaint: "C-004226", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000h1CUb2AM/view", costCzk: 1600.01, desc: "Rozleštění zadního nárazníku.", make: "Volkswagen", model: "Passat", firstReg: "2019-11-06", kmMileage: 96000, vin: "WVWZZZ3CZLE049208", driveLink: "https://drive.google.com/drive/folders/1siA-63jY_famnjmKTnL23TAoc6vsKE5y" },
+  { complaint: "C-004225", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000h1C9e2AE/view", costCzk: 1500.03, desc: "Leštění L strana zadního nárazníku, validace laku předního nárazníku.", make: "Mercedes-Benz", model: "C 43 AMG", firstReg: "2017-06-21", kmMileage: 140000, vin: "WDD2052641F592752", driveLink: "https://drive.google.com/drive/folders/1Oi-4ub7i2dVEuRHGsPtmDut60CAm2Rpo" },
+  { complaint: "C-004165", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gbV6H2AU/view", costCzk: 7999.06, desc: "Oprava a lakování předního nárazníku.", make: "BMW", model: "M240i", firstReg: "2025-02-27", kmMileage: 10771, vin: "WBA51CM0108F28128", driveLink: "https://drive.google.com/drive/folders/15T2hl3UredB_ralYQhc8WY6jpPqc8f6J" },
+  { complaint: "C-004224", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000h1CSz2AM/view", costCzk: 399.89, desc: "Střecha - rozleštění škrábance.", make: "Mercedes-Benz", model: "CLA 250", firstReg: "2025-08-28", kmMileage: 10251, vin: "W1KFJ1DB8SJ004132", driveLink: "https://drive.google.com/drive/folders/1pd_8G1caQx2GTGrti0hqCNDcBJB0h7Kw" },
+  { complaint: "C-004130", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000gSXaL2AW/view", costCzk: 5780.07, desc: "Přední nárazník - leštění, případně lakování.", make: "BMW", model: "X3", firstReg: "2022-07-27", kmMileage: 92253, vin: "WBA15BZ090N168451", driveLink: "https://drive.google.com/drive/folders/1iWQW5f6ih3BReQmYvkojgCw898KBS-ww" },
+  { complaint: "C-004232", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000h1ZFt2AM/view", costCzk: 1600.05, desc: "Odřený pravý práh, zaretušovat.", make: "Jaguar", model: "XE", firstReg: "2019-07-04", kmMileage: 74715, vin: "SAJAB4BXXJCP39636", driveLink: "https://drive.google.com/drive/folders/1uw70Db3W7At3bfZmEdMGAiRkghLIc18V" },
+];
+const DAMAGED_PAINT_TOTAL = DAMAGED_PAINT_DETAIL.reduce((s, r) => s + r.costCzk, 0);
+
+const TOTAL_C = MONTHLY_TOTALS.reduce((s, m) => s + m.complaints, 0);
+const TOTAL_COST = MONTHLY_TOTALS.reduce((s, m) => s + m.costCzk, 0);
+const TOTAL_CARS = MONTHLY_TOTALS.reduce((s, m) => s + m.carsArrived, 0);
+const TOTAL_CARS_WITH_COMPLAINT = MONTHLY_TOTALS.reduce((s, m) => s + m.carsWithComplaint, 0);
+const TOTAL_RATE = TOTAL_CARS ? (TOTAL_CARS_WITH_COMPLAINT / TOTAL_CARS) * 100 : 0;
+const TOTAL_CPC = CATEGORY_TOTALS.reduce((s, c) => s + c.count, 0);
+const TOTAL_JOB_COST = CATEGORY_TOTALS.reduce((s, c) => s + c.costCzk, 0);
+
+const CAT_COLOR = {
+  brakes: "#E5533D",
+  chassis: "#6B7A8F",
+  compensable: "#9B7EDE",
+  electronics: "#F2A93B",
+  engine: "#F2784B",
+  "exterior-cosmetics": "#4FB6A6",
+  interior: "#C9A876",
+  "transmission-drivetrain": "#5B8DEF",
+  other: "#7D8590",
+};
+const CAT_ORDER = ["brakes", "chassis", "compensable", "electronics", "engine", "exterior-cosmetics", "interior", "transmission-drivetrain", "other"];
+const CAT_LABEL = Object.fromEntries(CATEGORY_TOTALS.map(c => [c.key, c.label]));
+
+const fmtInt = (n) => new Intl.NumberFormat("cs-CZ").format(Math.round(n));
+const fmtCzk = (n) => new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 }).format(n) + " Kč";
+const fmtPct = (n) => (n * 100).toFixed(1).replace(".", ",") + " %";
+
+function ExteriorMonthlyTooltip({ active, payload, label, hoverKey }) {
+  if (!active || !payload || !payload.length || !hoverKey) return null;
+  const row = payload.find(p => p.dataKey === hoverKey);
+  if (!row || row.value <= 0) return null;
+  const monthTotal = payload.reduce((s, p) => s + (p.value || 0), 0);
+  const cost = (EXTERIOR_MONTHLY_COST[label] && EXTERIOR_MONTHLY_COST[label][hoverKey]) || 0;
+  return (
+    <div style={{ background: "#20262E", border: "1px solid #333B45", borderRadius: 8, padding: "10px 14px", fontSize: 12.5, minWidth: 220 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#E8EAED", fontWeight: 600, marginBottom: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 2, background: row.fill }} />
+        {EXTERIOR_LABEL[hoverKey]} · {label}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Počet problémů</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{row.value}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Podíl v měsíci</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{monthTotal ? ((row.value / monthTotal) * 100).toFixed(1).replace(".", ",") : "0,0"} %</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3" }}>
+        <span>Náklad (bez DPH)</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{cost ? fmtCzk(cost) : "—"}</span>
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({ label, value, sub }) {
+  return (
+    <div style={{
+      background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10,
+      padding: "18px 20px", flex: "1 1 200px", minWidth: 180,
+    }}>
+      <div style={{ color: "#8B92A0", fontSize: 12.5, letterSpacing: ".01em", marginBottom: 8 }}>{label}</div>
+      <div style={{ color: "#E8EAED", fontSize: 28, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ color: "#5F6773", fontSize: 12, marginTop: 6 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function CostTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  return (
+    <div style={{ background: "#20262E", border: "1px solid #333B45", borderRadius: 8, padding: "10px 14px", fontSize: 12.5, minWidth: 210 }}>
+      <div style={{ color: "#E8EAED", fontWeight: 600, marginBottom: 8 }}>{label}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Počet reklamací</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{row.complaints}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Celkové náklady</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtCzk(row.costCzk)}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#4FB6A6", fontWeight: 600 }}>
+        <span>Průměr / reklamaci</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtCzk(row.avgCostCzk)}</span>
+      </div>
+    </div>
+  );
+}
+
+function RateTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  return (
+    <div style={{ background: "#20262E", border: "1px solid #333B45", borderRadius: 8, padding: "10px 14px", fontSize: 12.5, minWidth: 200 }}>
+      <div style={{ color: "#E8EAED", fontWeight: 600, marginBottom: 8 }}>{label}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Auta na depu</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{row.carsArrived}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Z toho reklamovaných</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{row.carsWithComplaint}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#F2A93B", fontWeight: 600 }}>
+        <span>Podíl</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{row.ratePct.toFixed(1).replace(".", ",")} %</span>
+      </div>
+    </div>
+  );
+}
+function CustomTooltip({ active, payload, label, hoverCat }) {
+  if (!active || !payload || !payload.length || !hoverCat) return null;
+  const row = payload.find(p => p.dataKey === hoverCat);
+  if (!row || row.value <= 0) return null;
+  const monthTotal = payload.reduce((s, p) => s + (p.value || 0), 0);
+  const cost = (MONTHLY_CATEGORY_COST[label] && MONTHLY_CATEGORY_COST[label][hoverCat]) || 0;
+  return (
+    <div style={{ background: "#20262E", border: "1px solid #333B45", borderRadius: 8, padding: "10px 14px", fontSize: 12.5, minWidth: 190 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#E8EAED", fontWeight: 600, marginBottom: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 2, background: row.fill }} />
+        {CAT_LABEL[hoverCat]} · {label}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Počet problémů</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{row.value}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Podíl v měsíci</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{monthTotal ? ((row.value / monthTotal) * 100).toFixed(1).replace(".", ",") : "0,0"} %</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3" }}>
+        <span>Náklad (bez DPH)</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{cost ? fmtCzk(cost) : "—"}</span>
+      </div>
+    </div>
+  );
+}
+
+function ComplaintsDashboard() {
+  const [hoverCat, setHoverCat] = useState(null);
+  const [hoverExtKey, setHoverExtKey] = useState(null);
+
+  const catRows = useMemo(() => CATEGORY_TOTALS.map(c => ({
+    ...c,
+    pctOfCpc: TOTAL_CPC ? c.count / TOTAL_CPC : 0,
+    pctOfC: TOTAL_C ? c.count / TOTAL_C : 0,
+  })).sort((a, b) => b.count - a.count), []);
+
+  const maxCount = Math.max(...catRows.map(c => c.count));
+
+  return (
+    <div style={{
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+      background: "#14171C", color: "#E8EAED", padding: "28px 32px 40px",
+      minHeight: "100%", boxSizing: "border-box",
+    }}>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+      `}</style>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ color: "#8B92A0", fontSize: 13, marginBottom: 4 }}>Interní reklamace · Complaint_Problems podle kategorie</div>
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: "#F2F3F5" }}>
+          Přehled interních reklamací, leden 2025 – nyní
+        </h1>
+        <div style={{ color: "#5F6773", fontSize: 13, marginTop: 6, maxWidth: 640 }}>
+          Zdroj: Complaint__c (Type = Internal) × Complaint_Problem__c × Problem_Category__c. Zatím statická data z jednoho exportu — první nástřel k odsouhlasení struktury, ne živé napojení.
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 26 }}>
+        <KpiCard label="Reklamace celkem (C)" value={fmtInt(TOTAL_C)} sub="Complaint__c, Type = Internal" />
+        <KpiCard label="Problémy celkem (CPC)" value={fmtInt(TOTAL_CPC)} sub={`Ø ${(TOTAL_CPC / TOTAL_C).toFixed(2).replace(".", ",")} problému / reklamaci`} />
+        <KpiCard label="Náklady celkem" value={fmtCzk(TOTAL_COST)} sub="Cost_CZK__c, součet přes reklamace" />
+        <KpiCard label="Průměrný náklad / reklamaci" value={fmtCzk(TOTAL_COST / TOTAL_C)} />
+        <KpiCard label="Podíl na autech na depu" value={TOTAL_RATE.toFixed(1).replace(".", ",") + " %"} sub={`${fmtInt(TOTAL_CARS_WITH_COMPLAINT)} reklamovaných aut ze ${fmtInt(TOTAL_CARS)} dorazivších`} />
+      </div>
+
+      {/* Complaints vs cars arrived */}
+      <div style={{ background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10, padding: "18px 20px 8px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: "#E8EAED" }}>Kolik aut z depa skončilo s reklamací</div>
+          <div style={{ fontSize: 12, color: "#5F6773" }}>auta = Order.Car_Delivery_Date__c v daném měsíci</div>
+        </div>
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={MONTHLY_TOTALS} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2A3038" vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={{ stroke: "#2A3038" }} tickLine={false} />
+            <YAxis yAxisId="left" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={false} tickLine={false}
+              tickFormatter={(v) => `${v}%`} domain={[0, "dataMax + 10"]} />
+            <Tooltip content={<RateTooltip />} cursor={{ fill: "#ffffff08" }} />
+            <Bar yAxisId="left" dataKey="carsArrived" name="Auta na depu" fill="#5B8DEF" radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="left" dataKey="carsWithComplaint" name="Z toho reklamovaných" fill="#F2A93B" radius={[3, 3, 0, 0]} />
+            <Line yAxisId="right" type="monotone" dataKey="ratePct" name="Podíl (%)" stroke="#4FB6A6" strokeWidth={2} dot={{ r: 3, fill: "#4FB6A6" }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px", padding: "4px 4px 6px", justifyContent: "center", fontSize: 12.5, color: "#C7CCD3" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#5B8DEF" }} />Auta na depu</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#F2A93B" }} />Z toho reklamovaných</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#4FB6A6" }} />Podíl (%)</div>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#5F6773", padding: "0 4px 14px", lineHeight: 1.5 }}>
+          "Z toho reklamovaných" = počet aut, která dorazila na depo v daném měsíci a ke kterým později vznikla
+          alespoň jedna interní reklamace (navázáno přes Complaint__c → Order__c → Car_Delivery_Date__c). Jedno auto
+          může mít víc reklamací, ale počítá se jen jednou. Proto se toto číslo liší od "reklamace celkem" v KPI výše,
+          které počítá podle měsíce založení reklamace, ne podle měsíce příjezdu auta.
+        </div>
+      </div>
+
+      {/* Monthly cost + average cost per complaint */}
+      <div style={{ background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10, padding: "18px 20px 8px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: "#E8EAED" }}>Měsíční náklady a průměrná cena reklamace</div>
+          <div style={{ fontSize: 12, color: "#5F6773" }}>náklady bez DPH, Cost_CZK__c</div>
+        </div>
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={MONTHLY_TOTALS} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2A3038" vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={{ stroke: "#2A3038" }} tickLine={false} />
+            <YAxis yAxisId="count" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="cost" orientation="right" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={false} tickLine={false}
+              tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+            <YAxis yAxisId="avg" hide domain={[0, "dataMax + 2000"]} />
+            <Tooltip content={<CostTooltip />} cursor={{ fill: "#ffffff08" }} />
+            <Bar yAxisId="count" dataKey="complaints" name="Počet reklamací" fill="#5B8DEF" radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="cost" dataKey="costCzk" name="Celkové náklady" fill="#F2A93B" radius={[3, 3, 0, 0]} />
+            <Line yAxisId="avg" type="monotone" dataKey="avgCostCzk" name="Průměr / reklamaci" stroke="#4FB6A6" strokeWidth={2} dot={{ r: 3, fill: "#4FB6A6" }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px", padding: "4px 4px 6px", justifyContent: "center", fontSize: 12.5, color: "#C7CCD3" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#5B8DEF" }} />Počet reklamací</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#F2A93B" }} />Celkové náklady (Kč)</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#4FB6A6" }} />Průměr / reklamaci (Kč)</div>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#5F6773", padding: "0 4px 14px", lineHeight: 1.5 }}>
+          Průměr / reklamaci = celkové náklady měsíce ÷ počet reklamací založených ten měsíc. U reklamací, které ještě
+          nejsou uzavřené, vychází náklad z Effective_Price_without_VAT_in_CZK__c, což je odhadovaná cena, dokud není
+          job hotový a nemá reálnou cenu — poslední měsíce se proto mohou při doúčtování ještě mírně posunout.
+        </div>
+      </div>
+
+      {/* Stacked monthly chart */}
+      <div style={{ background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10, padding: "18px 20px 8px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: "#E8EAED" }}>Problémy podle měsíce a kategorie</div>
+          <div style={{ fontSize: 12, color: "#5F6773" }}>počet Complaint Problems</div>
+        </div>
+        <ResponsiveContainer width="100%" height={340}>
+          <BarChart data={MONTHLY_CATEGORY} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}
+            onMouseLeave={() => setHoverCat(null)}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2A3038" vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={{ stroke: "#2A3038" }} tickLine={false} />
+            <YAxis tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={false} tickLine={false} />
+            <Tooltip content={<CustomTooltip hoverCat={hoverCat} />} cursor={{ fill: "#ffffff08" }} />
+            {CAT_ORDER.map(key => (
+              <Bar key={key} dataKey={key} stackId="a" fill={CAT_COLOR[key]}
+                fillOpacity={hoverCat && hoverCat !== key ? 0.25 : 1}
+                onMouseEnter={() => setHoverCat(key)}
+                radius={key === "other" ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+        {/* legend */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", padding: "4px 4px 14px", justifyContent: "center" }}>
+          {CAT_ORDER.map(key => (
+            <div key={key} onMouseEnter={() => setHoverCat(key)} onMouseLeave={() => setHoverCat(null)}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: hoverCat && hoverCat !== key ? "#5F6773" : "#C7CCD3", cursor: "default" }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: CAT_COLOR[key] }} />
+              {CAT_LABEL[key]}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Category breakdown table + bar */}
+      <div style={{ background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10, padding: "18px 20px 20px", marginBottom: 20 }}>
+        <div style={{ fontSize: 14.5, fontWeight: 600, color: "#E8EAED", marginBottom: 2 }}>Rozpad podle kategorie problému</div>
+        <div style={{ fontSize: 12, color: "#5F6773", marginBottom: 14 }}>
+          % CPC = podíl na všech problémech ({fmtInt(TOTAL_CPC)}) · % C = u kolika % reklamací ({fmtInt(TOTAL_C)}) se kategorie objevila (součet &gt; 100 %, reklamace mívají víc kategorií) · Náklady = servisní joby (repairs) navázané na Complaint Problem dané kategorie
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "150px 1fr 60px 60px 60px 110px", gap: "6px 12px", fontSize: 12, color: "#5F6773", padding: "0 0 8px", borderBottom: "1px solid #2A3038" }}>
+          <div>Kategorie</div><div /><div style={{ textAlign: "right" }}>% CPC</div><div style={{ textAlign: "right" }}>% C</div><div style={{ textAlign: "right" }}>Joby</div><div style={{ textAlign: "right" }}>Náklady</div>
+        </div>
+        {catRows.map(c => (
+          <div key={c.key} style={{ display: "grid", gridTemplateColumns: "150px 1fr 60px 60px 60px 110px", gap: "6px 12px", alignItems: "center", padding: "9px 0", borderBottom: "1px solid #22272E" }}>
+            <div style={{ fontSize: 13, color: "#E8EAED", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: CAT_COLOR[c.key], flexShrink: 0 }} />
+              {c.label}
+            </div>
+            <div style={{ background: "#22272E", borderRadius: 4, height: 8, position: "relative" }}>
+              <div style={{ width: `${maxCount ? (c.count / maxCount) * 100 : 0}%`, background: CAT_COLOR[c.key], height: 8, borderRadius: 4 }} />
+            </div>
+            <div style={{ textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: "#C7CCD3" }}>{fmtPct(c.pctOfCpc)}</div>
+            <div style={{ textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: "#C7CCD3" }}>{fmtPct(c.pctOfC)}</div>
+            <div style={{ textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: "#C7CCD3" }}>{c.jobCnt || "—"}</div>
+            <div style={{ textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: "#C7CCD3" }}>{c.costCzk ? fmtCzk(c.costCzk) : "—"}</div>
+          </div>
+        ))}
+        <div style={{ fontSize: 11.5, color: "#5F6773", marginTop: 12, lineHeight: 1.5 }}>
+          Náklad = SUM(Effective_Price_without_VAT_in_CZK__c) přes Service_Job__c, kde job má vyplněný
+          Complaint_Problem__c — každý job patří přesně jedné kategorii, takže se nic nepočítá dvakrát.
+          Součet za kategorie ({fmtCzk(TOTAL_JOB_COST)}) je o něco nižší než celkový Cost_CZK__c na reklamacích
+          ({fmtCzk(TOTAL_COST)}) — rozdíl jsou zřejmě náklady bez navázání na konkrétní Complaint Problem
+          (např. joby bez vyplněného Complaint_Problem__c). Můžeme to spolu dohledat, pokud chceš přesnou shodu.
+        </div>
+      </div>
+
+      {/* Exterior – Cosmetics subcategory breakdown, monthly stacked — same layout as chart 3 */}
+      <div style={{ background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10, padding: "18px 20px 8px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: "#E8EAED" }}>Exterior – Cosmetics: podkategorie podle měsíce</div>
+          <div style={{ fontSize: 12, color: "#5F6773" }}>počet Complaint Problems, jen Exterior – Cosmetics</div>
+        </div>
+        <ResponsiveContainer width="100%" height={340}>
+          <BarChart data={EXTERIOR_MONTHLY} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}
+            onMouseLeave={() => setHoverExtKey(null)}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2A3038" vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={{ stroke: "#2A3038" }} tickLine={false} />
+            <YAxis tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={false} tickLine={false} />
+            <Tooltip content={<ExteriorMonthlyTooltip hoverKey={hoverExtKey} />} cursor={{ fill: "#ffffff08" }} />
+            {EXTERIOR_ORDER.map(key => (
+              <Bar key={key} dataKey={key} stackId="a" fill={EXTERIOR_COLOR[key]}
+                fillOpacity={hoverExtKey && hoverExtKey !== key ? 0.25 : 1}
+                onMouseEnter={() => setHoverExtKey(key)}
+                radius={key === "corrosion" ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", padding: "4px 4px 14px", justifyContent: "center" }}>
+          {EXTERIOR_ORDER.map(key => (
+            <div key={key} onMouseEnter={() => setHoverExtKey(key)} onMouseLeave={() => setHoverExtKey(null)}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: hoverExtKey && hoverExtKey !== key ? "#5F6773" : "#C7CCD3", cursor: "default" }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: EXTERIOR_COLOR[key] }} />
+              {EXTERIOR_LABEL[key]}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: "#5F6773" }}>
+        Kategorie "Compensable" se v datech za dané období u interních reklamací zatím neobjevuje (0 záznamů).
+      </div>
+
+      {/* Damaged paint detail with clickthrough links */}
+      <div style={{ background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10, padding: "18px 20px 20px", marginTop: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: "#E8EAED" }}>Exterior – Cosmetics · Damaged Paint: detail reklamací (7–8/2026)</div>
+          <div style={{ fontSize: 12, color: "#5F6773" }}>{DAMAGED_PAINT_DETAIL.length} reklamací · {fmtCzk(DAMAGED_PAINT_TOTAL)} celkem</div>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#5F6773", marginBottom: 14 }}>
+          Náklad = servisní job dané Complaint Problem (bez DPH) · proklik na reklamaci do Salesforce a na G-Drive složku vozu podle VIN
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #2A3038" }}>
+                {["Reklamace", "Náklad", "Original Problem Description", "Make", "Model", "Reg. datum", "Km", "G-Drive (VIN)"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i === 1 || i === 6 ? "right" : "left", color: "#5F6773", fontWeight: 500, padding: "0 10px 8px 0", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {DAMAGED_PAINT_DETAIL.map(r => (
+                <tr key={r.complaint} style={{ borderBottom: "1px solid #22272E" }}>
+                  <td style={{ padding: "8px 10px 8px 0", whiteSpace: "nowrap" }}>
+                    <a href={r.sfLink} target="_blank" rel="noopener noreferrer" style={{ color: "#5B8DEF", textDecoration: "none" }}>{r.complaint}</a>
+                  </td>
+                  <td style={{ padding: "8px 10px 8px 0", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", color: "#C7CCD3", whiteSpace: "nowrap" }}>{fmtCzk(r.costCzk)}</td>
+                  <td style={{ padding: "8px 10px 8px 0", color: "#C7CCD3", minWidth: 220, maxWidth: 320 }}>{r.desc}</td>
+                  <td style={{ padding: "8px 10px 8px 0", color: "#C7CCD3", whiteSpace: "nowrap" }}>{r.make}</td>
+                  <td style={{ padding: "8px 10px 8px 0", color: "#C7CCD3", whiteSpace: "nowrap" }}>{r.model}</td>
+                  <td style={{ padding: "8px 10px 8px 0", color: "#C7CCD3", whiteSpace: "nowrap", fontFamily: "'IBM Plex Mono', monospace" }}>{r.firstReg}</td>
+                  <td style={{ padding: "8px 10px 8px 0", textAlign: "right", color: "#C7CCD3", whiteSpace: "nowrap", fontFamily: "'IBM Plex Mono', monospace" }}>{fmtInt(r.kmMileage)}</td>
+                  <td style={{ padding: "8px 10px 8px 0", whiteSpace: "nowrap" }}>
+                    {r.driveLink
+                      ? <a href={r.driveLink} target="_blank" rel="noopener noreferrer" style={{ color: "#4FB6A6", textDecoration: "none", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5 }}>{r.vin}</a>
+                      : <span style={{ color: "#5F6773", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5 }}>{r.vin} (nenalezeno)</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#5F6773", marginTop: 12, lineHeight: 1.5 }}>
+          3 VINy nemají dohledanou G-Drive složku ve sdíleném adresáři (WBA51CM0008C66828, ZFAEFAR45NX127493, U5YPH814AKL727006).
+          VIN VF1RCB00569767470 (C-003936) má ve sdíleném adresáři dvě složky se stejným názvem — zde odkaz na starší z nich.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<ComplaintsDashboard />);
+</script>
+</body>
+</html>
