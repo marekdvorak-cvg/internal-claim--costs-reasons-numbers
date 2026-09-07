@@ -24,7 +24,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react">
+<script type="text/plain" id="app-source">
 const { useState, useMemo } = React;
 const { BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
 
@@ -637,6 +637,21 @@ try {
     '<div style="color:#fff;background:#3a1414;padding:20px;font-family:monospace;white-space:pre-wrap;">Chyba při načítání dashboardu:\n' + (err && err.message ? err.message : err) + '</div>';
   console.error(err);
 }
+</script>
+<script>
+(function() {
+  try {
+    var src = document.getElementById('app-source').textContent;
+    var output = Babel.transform(src, { presets: [['react', { runtime: 'classic' }]] }).code;
+    var s = document.createElement('script');
+    s.text = output;
+    document.body.appendChild(s);
+  } catch (err) {
+    document.body.innerHTML = '<pre style="color:#fff;background:#3a1414;padding:20px;white-space:pre-wrap;font-family:monospace;font-size:13px;">CHYBA PRI BABEL TRANSFORMACI:\n\n' +
+      (err && err.message ? err.message : err) + '</pre>';
+    console.error(err);
+  }
+})();
 </script>
 </body>
 </html>
