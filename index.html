@@ -24,8 +24,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/plain" id="app-source">
-const { useState, useMemo } = React;
+<script type="text/plain" id="app-source">const { useState, useMemo } = React;
 const { BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
 
 // ---------- Raw data (Salesforce: Complaint__c / Complaint_Problem__c / Problem_Category__c) ----------
@@ -375,6 +374,27 @@ function ComplaintsDashboard() {
   const [hoverCat, setHoverCat] = useState(null);
   const [hoverExtKey, setHoverExtKey] = useState(null);
 
+  const YEARLY = useMemo(() => {
+    const acc = {};
+    MONTHLY_TOTALS.forEach(m => {
+      const year = "20" + m.month.split("/")[1];
+      if (!acc[year]) acc[year] = { complaints: 0, costCzk: 0, carsArrived: 0, carsWithComplaint: 0 };
+      acc[year].complaints += m.complaints;
+      acc[year].costCzk += m.costCzk;
+      acc[year].carsArrived += m.carsArrived;
+      acc[year].carsWithComplaint += m.carsWithComplaint;
+    });
+    return Object.entries(acc).map(([year, v]) => ({
+      year,
+      ...v,
+      ratePct: v.carsArrived ? (v.carsWithComplaint / v.carsArrived) * 100 : 0,
+      avgCostPerCar: v.carsWithComplaint ? v.costCzk / v.carsWithComplaint : 0,
+      avgCostPerComplaint: v.complaints ? v.costCzk / v.complaints : 0,
+    }));
+  }, []);
+
+  const currentYear = "2026"; // k datu poslední aktualizace dat (8. 9. 2026)
+
   const catRows = useMemo(() => CATEGORY_TOTALS.map(c => ({
     ...c,
     pctOfCpc: TOTAL_CPC ? c.count / TOTAL_CPC : 0,
@@ -404,12 +424,46 @@ function ComplaintsDashboard() {
         </div>
       </div>
 
-      {/* KPI row */}
+      {/* Yearly summary: 2025 vs 2026 (YTD) */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 26 }}>
-        <KpiCard label="Reklamace celkem (C)" value={fmtInt(TOTAL_C)} sub="Complaint__c, Type = Internal" />
+        {YEARLY.map(y => (
+          <div key={y.year} style={{
+            background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10,
+            padding: "16px 20px", flex: "1 1 320px", minWidth: 300,
+          }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#F2F3F5" }}>{y.year}</div>
+              {y.year === currentYear && <div style={{ fontSize: 11.5, color: "#5F6773" }}>k 8. 9. 2026 (neúplný rok)</div>}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 16px" }}>
+              <div>
+                <div style={{ color: "#8B92A0", fontSize: 12, marginBottom: 4 }}>Reklamace</div>
+                <div style={{ color: "#E8EAED", fontSize: 20, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{fmtInt(y.complaints)}</div>
+              </div>
+              <div>
+                <div style={{ color: "#8B92A0", fontSize: 12, marginBottom: 4 }}>Náklady</div>
+                <div style={{ color: "#E8EAED", fontSize: 20, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{fmtCzk(y.costCzk)}</div>
+              </div>
+              <div>
+                <div style={{ color: "#8B92A0", fontSize: 12, marginBottom: 4 }}>Podíl na autech na depu</div>
+                <div style={{ color: "#E8EAED", fontSize: 20, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{y.ratePct.toFixed(1).replace(".", ",")} %</div>
+                <div style={{ color: "#5F6773", fontSize: 11 }}>{fmtInt(y.carsWithComplaint)} ze {fmtInt(y.carsArrived)} aut</div>
+              </div>
+              <div>
+                <div style={{ color: "#8B92A0", fontSize: 12, marginBottom: 4 }}>Průměr / auto</div>
+                <div style={{ color: "#E8EAED", fontSize: 20, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{fmtCzk(y.avgCostPerCar)}</div>
+                <div style={{ color: "#5F6773", fontSize: 11 }}>{fmtCzk(y.avgCostPerComplaint)} / reklamaci</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Overall totals (all-time) */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 26 }}>
+        <KpiCard label="Reklamace celkem (C)" value={fmtInt(TOTAL_C)} sub="Complaint__c, Type = Internal, 2025–dosud" />
         <KpiCard label="Problémy celkem (CPC)" value={fmtInt(TOTAL_CPC)} sub={`Ø ${(TOTAL_CPC / TOTAL_C).toFixed(2).replace(".", ",")} problému / reklamaci`} />
         <KpiCard label="Náklady celkem" value={fmtCzk(TOTAL_COST)} sub="Cost_CZK__c, součet přes reklamace" />
-        <KpiCard label="Průměrný náklad / reklamaci" value={fmtCzk(TOTAL_COST / TOTAL_C)} />
         <KpiCard label="Podíl na autech na depu" value={TOTAL_RATE.toFixed(1).replace(".", ",") + " %"} sub={`${fmtInt(TOTAL_CARS_WITH_COMPLAINT)} reklamovaných aut ze ${fmtInt(TOTAL_CARS)} dorazivších`} />
       </div>
 
@@ -628,15 +682,8 @@ function ComplaintsDashboard() {
   );
 }
 
-
-try {
-  const root = ReactDOM.createRoot(document.getElementById('root'));
-  root.render(<ComplaintsDashboard />);
-} catch (err) {
-  document.getElementById('root').innerHTML =
-    '<div style="color:#fff;background:#3a1414;padding:20px;font-family:monospace;white-space:pre-wrap;">Chyba při načítání dashboardu:\n' + (err && err.message ? err.message : err) + '</div>';
-  console.error(err);
-}
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<ComplaintsDashboard />);
 </script>
 <script>
 (function() {
