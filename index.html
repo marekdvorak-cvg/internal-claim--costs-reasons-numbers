@@ -190,6 +190,75 @@ const EXTERIOR_MONTHLY_COST = {
 };
 
 // Detail: Complaint Problems s podkategorií "Damaged paint" za 7-8/2026, pro proklik do konkrétní reklamace
+// Extrémní reklamace podle nákladu — hranice zvolena cca na horních ~5 % (p95) z rozdělení Cost_CZK__c
+// za celé období 2025-01 – dosud. Detekuje reklamace, kde jeden případ výrazně převyšuje běžný náklad.
+const EXTREME_THRESHOLD = 15000;
+const EXTREME_MONTHLY = [
+  { month: "01/25", extremeCount: 3, extremeCost: 194205.48, totalCount: 35, totalCost: 280812.76 },
+  { month: "02/25", extremeCount: 3, extremeCost: 59666.63, totalCount: 54, totalCost: 247366.97 },
+  { month: "03/25", extremeCount: 2, extremeCost: 46942.23, totalCount: 54, totalCost: 205828.15 },
+  { month: "04/25", extremeCount: 2, extremeCost: 39186.95, totalCount: 45, totalCost: 195202.10 },
+  { month: "05/25", extremeCount: 4, extremeCost: 88171.72, totalCount: 54, totalCost: 265301.70 },
+  { month: "06/25", extremeCount: 3, extremeCost: 84999.90, totalCount: 41, totalCost: 259102.37 },
+  { month: "07/25", extremeCount: 5, extremeCost: 226386.58, totalCount: 86, totalCost: 460000.15 },
+  { month: "08/25", extremeCount: 3, extremeCost: 65658.76, totalCount: 64, totalCost: 235026.38 },
+  { month: "09/25", extremeCount: 5, extremeCost: 117602.28, totalCount: 54, totalCost: 225479.42 },
+  { month: "10/25", extremeCount: 4, extremeCost: 277538.99, totalCount: 71, totalCost: 464572.10 },
+  { month: "11/25", extremeCount: 2, extremeCost: 83966.83, totalCount: 88, totalCost: 368127.92 },
+  { month: "12/25", extremeCount: 5, extremeCost: 156492.05, totalCount: 102, totalCost: 397006.35 },
+  { month: "01/26", extremeCount: 4, extremeCost: 98116.57, totalCount: 81, totalCost: 366158.84 },
+  { month: "02/26", extremeCount: 4, extremeCost: 179038.04, totalCount: 60, totalCost: 364861.45 },
+  { month: "03/26", extremeCount: 2, extremeCost: 88640.25, totalCount: 85, totalCost: 356115.13 },
+  { month: "04/26", extremeCount: 4, extremeCost: 67672.07, totalCount: 113, totalCost: 460360.88 },
+  { month: "05/26", extremeCount: 6, extremeCost: 152127.16, totalCount: 77, totalCost: 335208.95 },
+  { month: "06/26", extremeCount: 6, extremeCost: 137531.95, totalCount: 90, totalCost: 362588.45 },
+  { month: "07/26", extremeCount: 6, extremeCost: 261243.05, totalCount: 135, totalCost: 588056.88 },
+  { month: "08/26", extremeCount: 4, extremeCost: 64355.22, totalCount: 115, totalCost: 378495.76 },
+  { month: "09/26", extremeCount: 1, extremeCost: 15000.08, totalCount: 40, totalCost: 90953.31 },
+];
+const EXTREME_TOTAL_COUNT = EXTREME_MONTHLY.reduce((s, m) => s + m.extremeCount, 0);
+const EXTREME_TOTAL_COST = EXTREME_MONTHLY.reduce((s, m) => s + m.extremeCost, 0);
+const EXTREME_ALL_COUNT = EXTREME_MONTHLY.reduce((s, m) => s + m.totalCount, 0);
+const EXTREME_ALL_COST = EXTREME_MONTHLY.reduce((s, m) => s + m.totalCost, 0);
+
+// "Extrém extrém" — detail reklamací s nákladem >= 30 000 Kč bez DPH, seskupeno podle měsíce
+const SUPER_EXTREME_THRESHOLD = 30000;
+const SUPER_EXTREME_LIST = [
+  { complaint: "C-000096", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000JJP4b2AH/view", month: "01/25", costCzk: 145000.05, desc: "Závada převodovky", make: "BMW", model: "330", firstReg: "2018-06-01", km: 139190, categories: ["Transmission & Drivetrain"] },
+  { complaint: "C-000818", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000P3Tzx2AF/view", month: "06/25", costCzk: 34999.93, desc: "Kosmetické vady – lakování předního nárazníku, lakování prahu (P), čištění kůže a impregnace", make: "Mercedes-Benz", model: "CLS 400", firstReg: "2020-12-01", km: 114000, categories: ["Exterior - Cosmetics"] },
+  { complaint: "C-000841", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000PACuL2AX/view", month: "06/25", costCzk: 30000.08, desc: "Turbo – svítí žhavení, kontrolka poruchy motoru, pravděpodobně podtlaková baňka", make: "Volkswagen", model: "Crafter", firstReg: "2020-06-01", km: 142000, categories: ["Engine"] },
+  { complaint: "C-000943", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000Pq00j2AB/view", month: "07/25", costCzk: 31132.04, desc: "Oprava a lakování blatníku a dveří – předchozí oprava prodejce nekvalitní (zjištěno na keramice)", make: "Audi", model: "S6", firstReg: "2019-11-01", km: 83000, categories: ["Exterior - Cosmetics"] },
+  { complaint: "C-000962", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000PsnJt2AJ/view", month: "07/25", costCzk: 45800.03, desc: "Nutná oprava panoramatické střechy", make: "Seat", model: "Leon", firstReg: "2015-10-01", km: 125600, categories: ["Electronics"] },
+  { complaint: "C-000972", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000PtX6c2AF/view", month: "07/25", costCzk: 78016.48, desc: "Svítí kontrolka motoru, chybí krytka tažného", make: "Jaguar", model: "F-Pace", firstReg: "2019-01-01", km: 94689, categories: ["Engine"] },
+  { complaint: "C-000978", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000Py0FS2AZ/view", month: "07/25", costCzk: 52308.02, desc: "Nestabilní chod motoru – nutná diagnostika a oprava", make: "Audi", model: "A5", firstReg: "2014-11-01", km: 154000, categories: ["Engine"] },
+  { complaint: "C-001323", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000RcTW82AN/view", month: "08/25", costCzk: 30632.74, desc: "Netěsnosti v motoru, oprava zadního stěrače, problém s otevíráním kufru", make: "Audi", model: "A6", firstReg: "2021-05-06", km: 116100, categories: ["Engine", "Electronics"] },
+  { complaint: "C-001334", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000RleFN2AZ/view", month: "09/25", costCzk: 34999.93, desc: "Špatný chod motoru za studena, výměna dvouhmotového setrvačníku", make: "Volkswagen", model: "T6 Transporter", firstReg: "2019-08-01", km: 99800, categories: ["Transmission & Drivetrain"] },
+  { complaint: "C-001486", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000Sw57F2AR/view", month: "10/25", costCzk: 55270.92, desc: "Vozidlo nepojízdné – nutná diagnostika a oprava", make: "Jeep", model: "Compass", firstReg: "2019-05-01", km: 85000, categories: ["Engine"] },
+  { complaint: "C-001555", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000TIFW92AP/view", month: "10/25", costCzk: 40699.97, desc: "Chyba startování – diagnostika a oprava", make: "Audi", model: "A6", firstReg: "2022-07-01", km: 123213, categories: ["Electronics"] },
+  { complaint: "C-001683", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000UTB3d2AH/view", month: "10/25", costCzk: 160445.02, desc: "Výměna zadních pneumatik – nízký hmotnostní index", make: "Tesla", model: "Model S", firstReg: "2019-11-01", km: 152323, categories: ["Chassis"] },
+  { complaint: "C-001724", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000Uoj8j2AB/view", month: "11/25", costCzk: 58279.82, desc: "Neprošel měřením emisí, pravděpodobně výměna DPF", make: "Mercedes-Benz", model: "C 180", firstReg: "2018-04-01", km: 169000, categories: ["Engine"] },
+  { complaint: "C-002141", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000WaGru2AF/view", month: "12/25", costCzk: 53636.24, desc: "Vadný setrvačník a spojka", make: "Hyundai", model: "i40", firstReg: "2016-07-01", km: 149000, categories: ["Transmission & Drivetrain"] },
+  { complaint: "C-002166", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000Whjgz2AB/view", month: "12/25", costCzk: 33555.91, desc: "Opětovné rozsvícení kontrolky motoru po testovací jízdě", make: "Mercedes-Benz", model: "V 300", firstReg: "2021-04-01", km: 170250, categories: ["Engine"] },
+  { complaint: "C-002322", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000XNR4X2AX/view", month: "01/26", costCzk: 33499.34, desc: "Chyba nabíjení, závada 48V baterie", make: "Audi", model: "SQ5", firstReg: "2022-12-01", km: 29900, categories: ["Electronics"] },
+  { complaint: "C-002365", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000XTtpJ2AT/view", month: "01/26", costCzk: 31400.22, desc: "\"Cukání\" při přidání plynu – diagnostika a oprava", make: "BMW", model: "530", firstReg: "2020-04-01", km: 108339, categories: ["Chassis"] },
+  { complaint: "C-002351", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000XQX3U2AX/view", month: "02/26", costCzk: 76000.13, desc: "Souhrn víc závad – podvozek, výfuk, kotouče, světlomety, TPMS, demontáž tuningu, elektrické okno", make: "Jaguar", model: "XE", firstReg: "2016-11-01", km: 69723, categories: ["Engine"] },
+  { complaint: "C-002574", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000Y7HlJ2AV/view", month: "02/26", costCzk: 51339.89, desc: "Poškozeno při transportu na PickUp v garážích – nárazník a blatník, kontrola podvozku", make: "BMW", model: "540", firstReg: "2025-03-01", km: 29800, categories: ["Exterior - Cosmetics"] },
+  { complaint: "C-002837", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000YgltN2AR/view", month: "03/26", costCzk: 65120.14, desc: "Chyba tempomatu a chlazení", make: "Hyundai", model: "Kona", firstReg: "2020-12-01", km: 94022, categories: ["Electronics"] },
+  { complaint: "C-003159", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000aFGzB2AW/view", month: "05/26", costCzk: 37000.02, desc: "Chyba Pre-Collision assist", make: "Ford", model: "Ranger", firstReg: "2022-04-01", km: 84692, categories: ["Electronics"] },
+  { complaint: "C-003476", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000c9BRO2A2/view", month: "06/26", costCzk: 34718.95, desc: "Problém se světlem", make: "Polestar", model: "2", firstReg: "2021-03-01", km: 89821, categories: ["Electronics"] },
+  { complaint: "C-003745", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000e6Q7H2AU/view", month: "07/26", costCzk: 115293.81, desc: "Vibrace od zadní části vozidla, pravděpodobně diferenciál", make: "Jaguar", model: "E-Pace", firstReg: "2018-11-01", km: 98000, categories: ["Chassis"] },
+  { complaint: "C-003779", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000eLHdF2AW/view", month: "07/26", costCzk: 31452.20, desc: "Závada ABS + brzdového okruhu", make: "Peugeot", model: "3008", firstReg: "2023-04-12", km: 33191, categories: ["Brakes"] },
+  { complaint: "C-003953", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000fS9jw2AC/view", month: "07/26", costCzk: 54999.98, desc: "Zvýšená vůle v řízení, pravděpodobně sloupek řízení", make: "Land Rover", model: "Range Rover Evoque", firstReg: "2013-05-10", km: 149000, categories: ["Transmission & Drivetrain"] },
+];
+const SUPER_EXTREME_MONTHS = (() => {
+  const byMonth = {};
+  SUPER_EXTREME_LIST.forEach(item => {
+    if (!byMonth[item.month]) byMonth[item.month] = [];
+    byMonth[item.month].push(item);
+  });
+  return Object.entries(byMonth).map(([month, items]) => ({ month, items }));
+})();
+
 const DAMAGED_PAINT_DETAIL = [
   { complaint: "C-003761", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000eGjry2AC/view", costCzk: 6999.94, desc: "Lakování levých předních dveří", make: "Volvo", model: "XC90", firstReg: "2025-07-01", kmMileage: 21802, vin: "YV1LFH7VXT1428839", driveLink: "https://drive.google.com/drive/folders/1TsDFzYrcVAo2Gqnllpe1PxwAT1cRA_nA" },
   { complaint: "C-003832", sfLink: "https://carvago.lightning.force.com/lightning/r/Complaint__c/a0BMI00000ej2l42AA/view", costCzk: 7000.09, desc: "Oprava předního nárazníku", make: "Hyundai", model: "i30", firstReg: "2020-06-01", kmMileage: 78000, vin: "TMAHC51AALJ015970", driveLink: "https://drive.google.com/drive/folders/1uecVdGkie-c9TVOEfZflZ7AsUYayDp5G" },
@@ -297,6 +366,30 @@ function KpiCard({ label, value, sub }) {
   );
 }
 
+function ExtremeTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  const pctOfMonthCost = row.totalCost ? (row.extremeCost / row.totalCost) * 100 : 0;
+  return (
+    <div style={{ background: "#20262E", border: "1px solid #333B45", borderRadius: 8, padding: "10px 14px", fontSize: 12.5, minWidth: 230 }}>
+      <div style={{ color: "#E8EAED", fontWeight: 600, marginBottom: 8 }}>{label}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Extrémních reklamací</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{row.extremeCount} z {row.totalCount}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#C7CCD3", marginBottom: 3 }}>
+        <span>Jejich náklad</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtCzk(row.extremeCost)}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#E5533D", fontWeight: 600 }}>
+        <span>Podíl na nákladech měsíce</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{pctOfMonthCost.toFixed(1).replace(".", ",")} %</span>
+      </div>
+    </div>
+  );
+}
+
 function CostTooltip({ active, payload, label }) {
   if (!active || !payload || !payload.length) return null;
   const row = payload[0]?.payload;
@@ -373,6 +466,7 @@ function CustomTooltip({ active, payload, label, hoverCat }) {
 function ComplaintsDashboard() {
   const [hoverCat, setHoverCat] = useState(null);
   const [hoverExtKey, setHoverExtKey] = useState(null);
+  const [showExtremeList, setShowExtremeList] = useState(false);
 
   const YEARLY = useMemo(() => {
     const acc = {};
@@ -528,6 +622,65 @@ function ComplaintsDashboard() {
           Průměr / reklamaci = celkové náklady měsíce ÷ počet reklamací založených ten měsíc. U reklamací, které ještě
           nejsou uzavřené, vychází náklad z Effective_Price_without_VAT_in_CZK__c, což je odhadovaná cena, dokud není
           job hotový a nemá reálnou cenu — poslední měsíce se proto mohou při doúčtování ještě mírně posunout.
+        </div>
+      </div>
+
+      {/* Extreme complaints by cost */}
+      <div style={{ background: "#1C2128", border: "1px solid #2A3038", borderRadius: 10, padding: "18px 20px 8px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: "#E8EAED" }}>Extrémní reklamace podle nákladu</div>
+          <div style={{ fontSize: 12, color: "#5F6773" }}>hranice: náklad ≥ {fmtCzk(EXTREME_THRESHOLD)} (~horních 5 %)</div>
+        </div>
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={EXTREME_MONTHLY} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2A3038" vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={{ stroke: "#2A3038" }} tickLine={false} />
+            <YAxis tick={{ fill: "#8B92A0", fontSize: 11.5 }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip content={<ExtremeTooltip />} cursor={{ fill: "#ffffff08" }} />
+            <Bar dataKey="extremeCount" name="Extrémní reklamace" fill="#E5533D" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+        <div style={{ fontSize: 11.5, color: "#5F6773", padding: "4px 4px 14px", lineHeight: 1.5 }}>
+          Celkem {fmtInt(EXTREME_TOTAL_COUNT)} z {fmtInt(EXTREME_ALL_COUNT)} reklamací ({(EXTREME_TOTAL_COUNT / EXTREME_ALL_COUNT * 100).toFixed(1).replace(".", ",")} %)
+          spadá nad tuto hranici, ale dohromady tvoří {fmtCzk(EXTREME_TOTAL_COST)} — tedy {(EXTREME_TOTAL_COST / EXTREME_ALL_COST * 100).toFixed(1).replace(".", ",")} %
+          všech nákladů za celé období. Malá skupina nejdražších případů má nepoměrně velký dopad na celkový rozpočet.
+          Hranici lze kdykoliv posunout výš/níž podle toho, co má být za "extrémní" považováno.
+        </div>
+
+        {/* Collapsible "extrém extrém" list — complaints >= 30 000 Kč */}
+        <div style={{ borderTop: "1px solid #2A3038", marginTop: 4 }}>
+          <button
+            onClick={() => setShowExtremeList(v => !v)}
+            style={{
+              width: "100%", background: "none", border: "none", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "14px 4px", color: "#E8EAED", fontSize: 13.5, fontWeight: 600,
+            }}
+          >
+            <span>Extrém extrém — reklamace nad {fmtCzk(SUPER_EXTREME_THRESHOLD)} ({SUPER_EXTREME_LIST.length})</span>
+            <span style={{ color: "#5F6773", fontSize: 12, fontWeight: 400 }}>{showExtremeList ? "skrýt ▲" : "zobrazit ▼"}</span>
+          </button>
+          {showExtremeList && (
+            <div style={{ paddingBottom: 14 }}>
+              {SUPER_EXTREME_MONTHS.map(({ month, items }) => (
+                <div key={month} style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, color: "#8B92A0", fontWeight: 600, marginBottom: 6 }}>{month}</div>
+                  {items.map(c => (
+                    <div key={c.complaint} style={{ padding: "8px 0", borderBottom: "1px solid #22272E" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8, marginBottom: 3 }}>
+                        <a href={c.sfLink} target="_blank" rel="noopener noreferrer" style={{ color: "#5B8DEF", textDecoration: "none", fontWeight: 600, fontSize: 13 }}>{c.complaint}</a>
+                        <span style={{ color: "#C7CCD3", fontSize: 12.5 }}>{c.make} {c.model}</span>
+                        <span style={{ color: "#5F6773", fontSize: 12 }}>· 1. reg. {c.firstReg} · {fmtInt(c.km)} km</span>
+                        <span style={{ color: "#E5533D", fontSize: 13, fontWeight: 600, marginLeft: "auto" }}>{fmtCzk(c.costCzk)}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8B92A0", marginBottom: 2 }}>{c.categories.join(", ")}</div>
+                      <div style={{ fontSize: 12.5, color: "#C7CCD3", fontStyle: "italic" }}>{c.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
